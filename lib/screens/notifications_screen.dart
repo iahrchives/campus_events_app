@@ -6,6 +6,7 @@ import '../services/notification_service.dart';
 import '../theme/theme.dart';
 import '../widgets/forum_widgets.dart';
 import '../widgets/soft_card.dart';
+import 'admin_reports_screen.dart';
 import 'forum_post_detail_screen.dart';
 
 /// In-app notification centre — forum replies, reactions and messages aimed at
@@ -22,6 +23,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _open(AppNotification n) {
     NotificationService.instance.markRead(n.id);
+    if (n.type == AppNotificationType.report) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AdminReportsScreen()),
+      );
+      return;
+    }
     // Forum reply/reaction notifications deep-link into the thread.
     if ((n.type == AppNotificationType.forumReply ||
             n.type == AppNotificationType.forumReaction) &&

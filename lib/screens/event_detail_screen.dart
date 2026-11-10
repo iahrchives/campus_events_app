@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/event.dart';
+import '../services/chat_service.dart';
 import '../theme/theme.dart';
 import '../widgets/item_image.dart';
 import '../widgets/pill_button.dart';
@@ -15,6 +16,47 @@ class EventDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: ChatService.instance,
+      builder: (context, _) {
+        if (!ChatService.instance
+            .canSeeContentFromCurrentUser(event.organizerID)) {
+          return _unavailableScaffold();
+        }
+        return _buildContent(context);
+      },
+    );
+  }
+
+  Widget _unavailableScaffold() {
+    return Scaffold(
+      backgroundColor: AppColors.neutralLight,
+      appBar: AppBar(title: const Text('Event Details')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.visibility_off_outlined,
+                  size: 54, color: AppColors.textMuted),
+              const SizedBox(height: 12),
+              Text(
+                'This event is no longer available.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.neutralLight,
       appBar: AppBar(title: const Text('Event Details')),

@@ -35,6 +35,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           content: Text('This is your own listing.')));
       return;
     }
+    if (ChatService.instance.isBlockedBetween(me, item.posterID)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('This user is not available to message.')));
+      return;
+    }
     final convo = ChatService.instance.openConversation(
       itemId: item.itemID,
       itemTitle: item.title,
@@ -119,6 +124,47 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: ChatService.instance,
+      builder: (context, _) {
+        if (!ChatService.instance
+            .canSeeContentFromCurrentUser(item.posterID)) {
+          return _unavailableScaffold();
+        }
+        return _buildContent(context);
+      },
+    );
+  }
+
+  Widget _unavailableScaffold() {
+    return Scaffold(
+      backgroundColor: AppColors.neutralLight,
+      appBar: AppBar(title: const Text('Listing')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.visibility_off_outlined,
+                  size: 54, color: AppColors.textMuted),
+              const SizedBox(height: 12),
+              Text(
+                'This listing is no longer available.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     // Only the poster (or an admin) can edit/delete this listing.
     final canModify = AuthService.instance.canModify(item.posterID);
     // Build the combined media list: photos first, then videos.

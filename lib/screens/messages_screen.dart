@@ -5,10 +5,12 @@ import '../models/chat.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../theme/theme.dart';
+import '../widgets/contact_actions.dart';
 import '../widgets/forum_widgets.dart';
 import '../widgets/soft_card.dart';
 import '../widgets/user_avatar.dart';
 import 'chat_screen.dart';
+import 'contacts_screen.dart';
 
 /// Unified inbox: admin broadcasts + private buyer↔seller marketplace chats.
 /// Opened from the nav drawer Messages tab.
@@ -84,11 +86,51 @@ class _MessagesScreenState extends State<MessagesScreen> {
     );
   }
 
+  void _openContacts() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ContactsScreen()),
+    );
+  }
+
+  Future<void> _handleContactAction(
+    Conversation c,
+    String otherId,
+    String otherName,
+    String action,
+  ) async {
+    switch (action) {
+      case 'report':
+        await reportContactFlow(
+          context,
+          uid: otherId,
+          name: otherName,
+          conversationId: c.id,
+        );
+        break;
+      case 'remove':
+        await confirmRemoveContact(context, uid: otherId, name: otherName);
+        break;
+      case 'block':
+        await confirmBlockContact(context, uid: otherId, name: otherName);
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.neutralLight,
-      appBar: AppBar(title: const Text('Messages')),
+      appBar: AppBar(
+        title: const Text('Messages'),
+        actions: [
+          IconButton(
+            tooltip: 'Contacts',
+            icon: const Icon(Icons.contacts_outlined),
+            onPressed: _openContacts,
+          ),
+        ],
+      ),
       floatingActionButton: _isAdmin
           ? FloatingActionButton.extended(
               backgroundColor: AppColors.primary,
@@ -233,6 +275,19 @@ class _MessagesScreenState extends State<MessagesScreen> {
                           fontSize: 12.5, color: AppColors.textMuted)),
                 ],
               ),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Contact options',
+              padding: EdgeInsets.zero,
+              iconSize: 20,
+              icon: Icon(Icons.more_vert, color: AppColors.textMuted),
+              onSelected: (action) =>
+                  _handleContactAction(c, otherId, otherName, action),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'report', child: Text('Report contact')),
+                PopupMenuItem(value: 'remove', child: Text('Remove contact')),
+                PopupMenuItem(value: 'block', child: Text('Block contact')),
+              ],
             ),
           ],
         ),

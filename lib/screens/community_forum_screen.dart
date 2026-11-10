@@ -139,9 +139,11 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
                       .toList();
                 }
                 if (_tab == 1) {
-                  // Trending = most reactions + comments.
-                  posts.sort((a, b) => (b.reactionCount + b.commentCount)
-                      .compareTo(a.reactionCount + a.commentCount));
+                  // Trending = most reactions + visible comments.
+                  int score(ForumPost p) =>
+                      p.reactionCount +
+                      ForumService.instance.visibleComments(p).length;
+                  posts.sort((a, b) => score(b).compareTo(score(a)));
                 }
                 if (posts.isEmpty) {
                   return Center(
@@ -208,7 +210,11 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
               const SizedBox(height: 10),
               ForumMedia(imageURL: post.imageURL, videoURL: post.videoURL),
             ],
-            ReactionSummary(post: post),
+            ReactionSummary(
+              post: post,
+              commentCount:
+                  ForumService.instance.visibleComments(post).length,
+            ),
             const Divider(height: 6),
             Row(
               children: [

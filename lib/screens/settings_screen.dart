@@ -6,6 +6,7 @@ import '../services/settings_controller.dart';
 import '../theme/theme.dart';
 import '../widgets/soft_card.dart';
 import 'account_verification_screen.dart';
+import 'contacts_screen.dart';
 
 /// App Settings — typical preferences incl. a working dark-mode toggle.
 class SettingsScreen extends StatefulWidget {
@@ -64,6 +65,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Language',
             trailing: _s.language,
             onTap: _pickLanguage,
+          ),
+          _navTile(
+            icon: Icons.contacts_outlined,
+            title: 'Manage Contacts',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ContactsScreen()),
+              );
+            },
           ),
           _navTile(
             icon: Icons.lock_outline,

@@ -2,7 +2,9 @@ import 'dart:async';
 
 import '../models/forum_post.dart';
 import 'auth_service.dart';
+import 'chat_service.dart';
 import 'notification_service.dart';
+import 'report_service.dart';
 
 /// Mock community forum store with a broadcast stream so the list and the
 /// thread detail stay in sync (mirrors a Firestore `Posts` + comments layout).
@@ -11,6 +13,8 @@ class ForumService {
     _controller = StreamController<List<ForumPost>>.broadcast(
       onListen: () => _controller.add(List.unmodifiable(_posts)),
     );
+    // Re-emit when blocks change so hidden authors disappear live.
+    ChatService.instance.addListener(_emit);
   }
   static final ForumService instance = ForumService._();
 
@@ -71,15 +75,33 @@ class ForumService {
     ),
   ];
 
-  Stream<List<ForumPost>> get stream => _controller.stream;
-  List<ForumPost> get current => List.unmodifiable(_posts);
+  Stream<List<ForumPost>> get stream => _controller.stream
+      .map((all) => all.where((p) => canSeeAuthor(p.authorId)).toList());
+  List<ForumPost> get current =>
+      _posts.where((p) => canSeeAuthor(p.authorId)).toList();
 
+  /// Whether the signed-in user may see content authored by [authorId].
+  bool canSeeAuthor(String authorId) =>
+      ChatService.instance.canSeeContentFromCurrentUser(authorId);
+
+  /// Raw lookup used internally by moderation/mutation methods.
   ForumPost? byId(String id) {
     for (final p in _posts) {
       if (p.id == id) return p;
     }
     return null;
   }
+
+  /// Lookup that respects block visibility (returns null when hidden).
+  ForumPost? visibleById(String id) {
+    final post = byId(id);
+    if (post == null || !canSeeAuthor(post.authorId)) return null;
+    return post;
+  }
+
+  /// Comments on [post] whose authors are not hidden by a block.
+  List<ForumComment> visibleComments(ForumPost post) =>
+      post.comments.where((c) => canSeeAuthor(c.authorId)).toList();
 
   void _emit() => _controller.add(List.unmodifiable(_posts));
 
@@ -227,22 +249,45 @@ class ForumService {
     );
   }
 
-  /// Flags a post for moderation (mock — increments a counter, stores reason).
+  /// Flags a post for moderation and sends it to the admin report inbox.
   void reportPost(String postId, {String? reason}) {
     final post = byId(postId);
     if (post == null) return;
+    final reporterId = AuthService.instance.currentUser?.uid ?? '';
+    if (reporterId.isEmpty || reporterId == post.authorId) return;
     post.reports += 1;
+    ReportService.instance.submitForumPost(
+      reporterId: reporterId,
+      reporterName: AuthService.instance.currentUser?.fullName,
+      postId: post.id,
+      authorId: post.authorId,
+      authorName: post.author,
+      reason: reason ?? 'No reason provided',
+      contentPreview: post.body,
+    );
     _emit();
   }
 
+  /// Flags a reply for moderation and sends it to the admin report inbox.
   void reportComment(String postId, String commentId, {String? reason}) {
     final post = byId(postId);
     if (post == null) return;
     for (final c in post.comments) {
-      if (c.id == commentId) {
-        c.reports += 1;
-        break;
-      }
+      if (c.id != commentId) continue;
+      final reporterId = AuthService.instance.currentUser?.uid ?? '';
+      if (reporterId.isEmpty || reporterId == c.authorId) return;
+      c.reports += 1;
+      ReportService.instance.submitForumComment(
+        reporterId: reporterId,
+        reporterName: AuthService.instance.currentUser?.fullName,
+        postId: post.id,
+        commentId: c.id,
+        authorId: c.authorId,
+        authorName: c.author,
+        reason: reason ?? 'No reason provided',
+        contentPreview: c.body,
+      );
+      break;
     }
     _emit();
   }

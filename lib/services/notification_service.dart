@@ -3,7 +3,14 @@ import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 
 /// Kinds of in-app notifications surfaced in the navigation bar bell.
-enum AppNotificationType { forumReply, forumReaction, message, announcement, system }
+enum AppNotificationType {
+  forumReply,
+  forumReaction,
+  message,
+  announcement,
+  report,
+  system,
+}
 
 extension AppNotificationTypeX on AppNotificationType {
   IconData get icon {
@@ -16,6 +23,8 @@ extension AppNotificationTypeX on AppNotificationType {
         return Icons.chat_bubble_outline;
       case AppNotificationType.announcement:
         return Icons.campaign_outlined;
+      case AppNotificationType.report:
+        return Icons.flag_outlined;
       case AppNotificationType.system:
         return Icons.notifications_outlined;
     }
@@ -31,6 +40,8 @@ extension AppNotificationTypeX on AppNotificationType {
         return AppColors.secondary;
       case AppNotificationType.announcement:
         return AppColors.success;
+      case AppNotificationType.report:
+        return AppColors.danger;
       case AppNotificationType.system:
         return AppColors.textMuted;
     }

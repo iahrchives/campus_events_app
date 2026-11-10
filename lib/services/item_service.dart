@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../models/item.dart';
+import 'chat_service.dart';
 
 /// Mock store for the shared `Items` collection (Marketplace + Lost & Found).
 /// Streams are filtered by [PostType] just like the Firestore query will be.
@@ -9,6 +10,8 @@ class ItemService {
     _controller = StreamController<List<MarketItem>>.broadcast(
       onListen: () => _controller.add(List.unmodifiable(_items)),
     );
+    // Re-emit when blocks change so blocked users' listings disappear live.
+    ChatService.instance.addListener(_emit);
   }
   static final ItemService instance = ItemService._();
 
@@ -27,31 +30,37 @@ class ItemService {
     const MarketItem(itemID: 'l4', title: 'Set of Keys', description: 'Found at the parking lot.', postType: PostType.lostFound, posterID: 'uid_pending_002'),
   ];
 
+  bool _canSee(MarketItem item) =>
+      ChatService.instance.canSeeContentFromCurrentUser(item.posterID);
+
+  void _emit() => _controller.add(List.unmodifiable(_items));
+
   /// Filtered stream — pass the post type for each screen.
   Stream<List<MarketItem>> streamByType(PostType type) {
-    return _controller.stream
-        .map((all) => all.where((i) => i.postType == type).toList());
+    return _controller.stream.map((all) => all
+        .where((i) => i.postType == type && _canSee(i))
+        .toList());
   }
 
   List<MarketItem> byType(PostType type) =>
-      _items.where((i) => i.postType == type).toList();
+      _items.where((i) => i.postType == type && _canSee(i)).toList();
 
   Future<void> addItem(MarketItem item) async {
     await Future.delayed(const Duration(milliseconds: 400));
     _items.insert(0, item);
-    _controller.add(List.unmodifiable(_items));
+    _emit();
   }
 
   Future<void> updateItem(MarketItem item) async {
     await Future.delayed(const Duration(milliseconds: 300));
     final i = _items.indexWhere((e) => e.itemID == item.itemID);
     if (i != -1) _items[i] = item;
-    _controller.add(List.unmodifiable(_items));
+    _emit();
   }
 
   Future<void> deleteItem(String itemID) async {
     await Future.delayed(const Duration(milliseconds: 300));
     _items.removeWhere((e) => e.itemID == itemID);
-    _controller.add(List.unmodifiable(_items));
+    _emit();
   }
 }

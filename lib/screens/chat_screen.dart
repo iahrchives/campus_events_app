@@ -1,9 +1,12 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+
+import 'package:flutter/material.dart';
 
 import '../models/chat.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../theme/theme.dart';
+import '../widgets/contact_actions.dart';
 import '../widgets/user_avatar.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -19,8 +22,13 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  static const Duration _sendCooldown = Duration(seconds: 3);
+
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
+  Timer? _cooldownTimer;
+  int _cooldownRemaining = 0;
 
   // PBI-3: Quick-Reply Canned Response Templates
   final List<String> _quickReplies = [
@@ -39,6 +47,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _cooldownTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -60,19 +69,96 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = (textToSend ?? _controller.text).trim();
     if (text.isEmpty) return;
 
+    if (_cooldownRemaining > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Please wait ${_cooldownRemaining}s before sending again.',
+        ),
+        duration: const Duration(seconds: 1),
+      ));
+      return;
+    }
+
     final currentUid = AuthService.instance.currentUser?.uid ?? '';
     if (currentUid.isEmpty) return;
 
-    ChatService.instance.send(
+    final sent = ChatService.instance.send(
       widget.conversation.id,
       currentUid,
       text,
     );
+    if (!sent) return;
 
     if (textToSend == null) {
       _controller.clear();
     }
     _scrollToBottom();
+    _startCooldown();
+  }
+
+  void _startCooldown() {
+    _cooldownTimer?.cancel();
+    setState(() => _cooldownRemaining = _sendCooldown.inSeconds);
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_cooldownRemaining <= 1) {
+        timer.cancel();
+        setState(() => _cooldownRemaining = 0);
+      } else {
+        setState(() => _cooldownRemaining -= 1);
+      }
+    });
+  }
+
+  Future<void> _handleContactAction(String action) async {
+    final currentUid = AuthService.instance.currentUser?.uid ?? '';
+    final otherUid = widget.conversation.otherParty(currentUid);
+    final otherName = AuthService.instance.nameForUid(otherUid);
+
+    ContactActionResult result;
+    switch (action) {
+      case 'report':
+        result = await reportContactFlow(
+          context,
+          uid: otherUid,
+          name: otherName,
+          conversationId: widget.conversation.id,
+        );
+        break;
+      case 'remove':
+        result = await confirmRemoveContact(
+          context,
+          uid: otherUid,
+          name: otherName,
+        );
+        break;
+      case 'block':
+        result = await confirmBlockContact(
+          context,
+          uid: otherUid,
+          name: otherName,
+        );
+        break;
+      default:
+        return;
+    }
+
+    if (!mounted) return;
+    if (result == ContactActionResult.removed ||
+        result == ContactActionResult.blocked) {
+      Navigator.pop(context);
+    } else {
+      setState(() {});
+    }
+  }
+
+  void _unblock(String otherUid) {
+    final currentUid = AuthService.instance.currentUser?.uid ?? '';
+    ChatService.instance.unblockContact(currentUid, otherUid);
+    setState(() {});
   }
 
   // PBI-3: Vertically stacked buttons (Pababa ang mga pagpipilian)
@@ -153,11 +239,26 @@ class _ChatScreenState extends State<ChatScreen> {
     final otherUid = convo.otherParty(currentUid);
     final otherName = AuthService.instance.nameForUid(otherUid);
     final otherPhoto = AuthService.instance.profileForUid(otherUid)?.photoURL;
+    final blockedByMe = ChatService.instance.hasBlocked(currentUid, otherUid);
+    final blockedMe = ChatService.instance.hasBlocked(otherUid, currentUid);
+    final isBlocked = blockedByMe || blockedMe;
 
     return Scaffold(
       backgroundColor: AppColors.neutralLight,
       appBar: AppBar(
         titleSpacing: 0,
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Contact options',
+            icon: const Icon(Icons.more_vert),
+            onSelected: _handleContactAction,
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'report', child: Text('Report contact')),
+              PopupMenuItem(value: 'remove', child: Text('Remove contact')),
+              PopupMenuItem(value: 'block', child: Text('Block contact')),
+            ],
+          ),
+        ],
         title: Row(
           children: [
             UserAvatar(
@@ -208,6 +309,32 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
           ),
+
+          if (isBlocked)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: AppColors.danger.withValues(alpha: 0.1),
+              child: Row(
+                children: [
+                  const Icon(Icons.block, size: 16, color: AppColors.danger),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      blockedByMe
+                          ? 'You blocked this contact. Unblock to continue messaging.'
+                          : 'You can no longer message this contact.',
+                      style: TextStyle(fontSize: 12, color: AppColors.danger),
+                    ),
+                  ),
+                  if (blockedByMe)
+                    TextButton(
+                      onPressed: () => _unblock(otherUid),
+                      child: const Text('Unblock'),
+                    ),
+                ],
+              ),
+            ),
 
           // Message Thread Stream
           Expanded(
@@ -277,48 +404,68 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
-          // PBI-3: Quick-Reply Bar (Naka-linya pababa)
-          _buildQuickReplyBar(),
+          if (!isBlocked) ...[
+            // PBI-3: Quick-Reply Bar (Naka-linya pababa)
+            _buildQuickReplyBar(),
 
-          // Input field bar
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                top: BorderSide(color: AppColors.surfaceTint.withValues(alpha: 0.3)),
+            // Input field bar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  top: BorderSide(
+                      color: AppColors.surfaceTint.withValues(alpha: 0.3)),
+                ),
               ),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      decoration: InputDecoration(
-                        hintText: 'Type a message...',
-                        hintStyle: TextStyle(fontSize: 14, color: AppColors.textMuted),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        filled: true,
-                        fillColor: AppColors.neutralLight,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
+              child: SafeArea(
+                top: false,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        decoration: InputDecoration(
+                          hintText: 'Type a message...',
+                          hintStyle: TextStyle(
+                              fontSize: 14, color: AppColors.textMuted),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          filled: true,
+                          fillColor: AppColors.neutralLight,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
                         ),
+                        onSubmitted: (_) => _sendMessage(),
                       ),
-                      onSubmitted: (_) => _sendMessage(),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.send_rounded, color: AppColors.primary),
-                    onPressed: () => _sendMessage(),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: _cooldownRemaining > 0
+                          ? 'Please wait ${_cooldownRemaining}s'
+                          : 'Send',
+                      icon: _cooldownRemaining > 0
+                          ? Text(
+                              '${_cooldownRemaining}s',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textMuted,
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded,
+                              color: AppColors.primary),
+                      onPressed: _cooldownRemaining > 0
+                          ? null
+                          : () => _sendMessage(),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

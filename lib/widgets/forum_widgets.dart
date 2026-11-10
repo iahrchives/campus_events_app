@@ -69,12 +69,17 @@ class ForumMedia extends StatelessWidget {
 /// Summary row showing the top reaction emojis + total count, and comments.
 class ReactionSummary extends StatelessWidget {
   final ForumPost post;
-  const ReactionSummary({super.key, required this.post});
+
+  /// Optional visible comment count when some comments are hidden by blocks.
+  final int? commentCount;
+
+  const ReactionSummary({super.key, required this.post, this.commentCount});
 
   @override
   Widget build(BuildContext context) {
     final tops = post.topReactions;
-    if (post.reactionCount == 0 && post.commentCount == 0) {
+    final count = commentCount ?? post.commentCount;
+    if (post.reactionCount == 0 && count == 0) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -90,10 +95,10 @@ class ReactionSummary extends StatelessWidget {
                     fontSize: 12.5, color: AppColors.textMuted)),
           ],
           const Spacer(),
-          if (post.commentCount > 0)
+          if (count > 0)
             Text(
-                '${post.commentCount} '
-                '${post.commentCount == 1 ? "comment" : "comments"}',
+                '$count '
+                '${count == 1 ? "comment" : "comments"}',
                 style: TextStyle(
                     fontSize: 12.5, color: AppColors.textMuted)),
         ],

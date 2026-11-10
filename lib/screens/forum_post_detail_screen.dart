@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/forum_post.dart';
 import '../services/auth_service.dart';
+import '../services/chat_service.dart';
 import '../services/forum_service.dart';
 import '../theme/theme.dart';
 import '../widgets/forum_widgets.dart';
@@ -144,84 +145,96 @@ class _ForumPostDetailScreenState extends State<ForumPostDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final post = ForumService.instance.byId(widget.postId);
-    final canModify =
-        post != null && AuthService.instance.canModify(post.authorId);
-    return Scaffold(
-      backgroundColor: AppColors.neutralLight,
-      appBar: AppBar(
-        title: const Text('Post'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'delete') _confirmDelete();
-              if (v == 'report') _report();
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: 'report',
-                child: Row(children: [
-                  Icon(Icons.flag_outlined, size: 20),
-                  SizedBox(width: 10),
-                  Text('Report post'),
-                ]),
-              ),
-              if (canModify)
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(children: [
-                    Icon(Icons.delete_outline,
-                        size: 20, color: AppColors.danger),
-                    SizedBox(width: 10),
-                    Text('Delete post',
-                        style: TextStyle(color: AppColors.danger)),
-                  ]),
+    return AnimatedBuilder(
+      animation: ChatService.instance,
+      builder: (context, _) {
+        final post = ForumService.instance.visibleById(widget.postId);
+        final canModify =
+            post != null && AuthService.instance.canModify(post.authorId);
+        return Scaffold(
+          backgroundColor: AppColors.neutralLight,
+          appBar: AppBar(
+            title: const Text('Post'),
+            actions: [
+              if (post != null)
+                PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'delete') _confirmDelete();
+                    if (v == 'report') _report();
+                  },
+                  itemBuilder: (ctx) => [
+                    const PopupMenuItem(
+                      value: 'report',
+                      child: Row(children: [
+                        Icon(Icons.flag_outlined, size: 20),
+                        SizedBox(width: 10),
+                        Text('Report post'),
+                      ]),
+                    ),
+                    if (canModify)
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(children: [
+                          Icon(Icons.delete_outline,
+                              size: 20, color: AppColors.danger),
+                          SizedBox(width: 10),
+                          Text('Delete post',
+                              style: TextStyle(color: AppColors.danger)),
+                        ]),
+                      ),
+                  ],
                 ),
             ],
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<List<ForumPost>>(
-              stream: ForumService.instance.stream,
-              initialData: ForumService.instance.current,
-              builder: (context, snapshot) {
-                final post = ForumService.instance.byId(widget.postId);
-                if (post == null) {
-                  return const Center(child: Text('Post not found.'));
-                }
-                return ListView(
-                  controller: _scroll,
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _postCard(post),
-                    const SizedBox(height: 16),
-                    Text(
-                      '${post.commentCount} '
-                      '${post.commentCount == 1 ? "Comment" : "Comments"}',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textDark),
-                    ),
-                    const SizedBox(height: 8),
-                    if (post.comments.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text('No comments yet. Start the conversation!',
-                            style: TextStyle(color: AppColors.textMuted)),
-                      )
-                    else
-                      ...post.comments.map(_commentTile),
-                  ],
-                );
-              },
-            ),
+          body: Column(
+            children: [
+              Expanded(
+                child: StreamBuilder<List<ForumPost>>(
+                  stream: ForumService.instance.stream,
+                  initialData: ForumService.instance.current,
+                  builder: (context, snapshot) {
+                    final visiblePost =
+                        ForumService.instance.visibleById(widget.postId);
+                    if (visiblePost == null) {
+                      return const Center(
+                        child: Text('Post not found or no longer available.'),
+                      );
+                    }
+                    final comments =
+                        ForumService.instance.visibleComments(visiblePost);
+                    return ListView(
+                      controller: _scroll,
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        _postCard(visiblePost),
+                        const SizedBox(height: 16),
+                        Text(
+                          '${comments.length} '
+                          '${comments.length == 1 ? "Comment" : "Comments"}',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark),
+                        ),
+                        const SizedBox(height: 8),
+                        if (comments.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            child: Text(
+                                'No comments yet. Start the conversation!',
+                                style: TextStyle(color: AppColors.textMuted)),
+                          )
+                        else
+                          ...comments.map(_commentTile),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              if (post != null) _composer(),
+            ],
           ),
-          _composer(),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -264,7 +277,10 @@ class _ForumPostDetailScreenState extends State<ForumPostDetailScreen> {
             ForumMedia(imageURL: post.imageURL, videoURL: post.videoURL),
           ],
           const Divider(height: 22),
-          ReactionSummary(post: post),
+          ReactionSummary(
+            post: post,
+            commentCount: ForumService.instance.visibleComments(post).length,
+          ),
           const Divider(height: 8),
           Row(
             children: [

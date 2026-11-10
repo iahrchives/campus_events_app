@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/report_service.dart';
 import '../services/settings_controller.dart';
 import '../theme/theme.dart';
 import '../widgets/user_avatar.dart';
+import 'admin_reports_screen.dart';
 import 'announcements_screen.dart';
 import 'campus_map_screen.dart';
 import 'campus_marketplace_screen.dart';
@@ -49,6 +51,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
     AuthService.instance.addListener(_onChanged);
     NotificationService.instance.addListener(_onChanged);
     ChatService.instance.addListener(_onChanged);
+    ReportService.instance.addListener(_onChanged);
   }
 
   @override
@@ -57,6 +60,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
     AuthService.instance.removeListener(_onChanged);
     NotificationService.instance.removeListener(_onChanged);
     ChatService.instance.removeListener(_onChanged);
+    ReportService.instance.removeListener(_onChanged);
     super.dispose();
   }
 
@@ -96,9 +100,11 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
           'Announcements', Icons.campaign_rounded, const AnnouncementsScreen()),
       _NavEntry('Messages', Icons.chat_bubble_outline_rounded,
           const MessagesScreen()),
-      if (isAdmin)
+      if (isAdmin) ...[
         _NavEntry('Verification', Icons.verified_user_rounded,
             const VerificationAdminScreen()),
+        _NavEntry('Reports', Icons.flag_rounded, const AdminReportsScreen()),
+      ],
       _NavEntry('Settings', Icons.settings_rounded, const SettingsScreen()),
     ];
   }
@@ -180,6 +186,7 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
   Widget _buildDrawer(BuildContext context, List<_NavEntry> entries) {
     final uid = AuthService.instance.currentUser?.uid ?? '';
     final unreadMessages = ChatService.instance.unreadFor(uid);
+    final openReports = ReportService.instance.openCount;
     final user = AuthService.instance.currentUser;
     return Drawer(
       backgroundColor: AppColors.neutralLight,
@@ -266,24 +273,11 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
                         color: AppColors.textDark,
                       ),
                     ),
-                    trailing: entries[i].label == 'Messages' &&
-                            unreadMessages > 0
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
-                            decoration: const BoxDecoration(
-                              color: AppColors.danger,
-                              borderRadius: BorderRadius.all(Radius.circular(10)),
-                            ),
-                            child: Text(
-                              unreadMessages > 9 ? '9+' : '$unreadMessages',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800),
-                            ),
-                          )
-                        : null,
+                    trailing: _navBadge(
+                      entries[i].label,
+                      unreadMessages,
+                      openReports,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),
@@ -315,6 +309,27 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
             const SizedBox(height: 12),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget? _navBadge(String label, int unreadMessages, int openReports) {
+    final count = switch (label) {
+      'Messages' => unreadMessages,
+      'Reports' => openReports,
+      _ => 0,
+    };
+    if (count <= 0) return null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: const BoxDecoration(
+        color: AppColors.danger,
+        borderRadius: BorderRadius.all(Radius.circular(10)),
+      ),
+      child: Text(
+        count > 9 ? '9+' : '$count',
+        style: const TextStyle(
+            color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
       ),
     );
   }

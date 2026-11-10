@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../models/event.dart';
+import 'chat_service.dart';
 
 /// Mock events store exposing a broadcast [Stream] so screens can use
 /// `StreamBuilder` exactly like they will with Firestore (see README → Step 3).
@@ -15,6 +16,8 @@ class EventService {
     _reqController = StreamController<List<EventRequest>>.broadcast(
       onListen: () => _reqController.add(List.unmodifiable(_requests)),
     );
+    // Re-emit when blocks change so hidden organizers' events disappear live.
+    ChatService.instance.addListener(_emitEvents);
   }
   static final EventService instance = EventService._();
 
@@ -80,14 +83,20 @@ class EventService {
 
   final List<EventRequest> _requests = [];
 
-  Stream<List<CampusEvent>> get stream => _controller.stream;
-  List<CampusEvent> get current => List.unmodifiable(_events);
+  bool _canSee(CampusEvent event) =>
+      ChatService.instance.canSeeContentFromCurrentUser(event.organizerID);
+
+  void _emitEvents() => _controller.add(List.unmodifiable(_events));
+
+  Stream<List<CampusEvent>> get stream => _controller.stream
+      .map((all) => all.where(_canSee).toList());
+  List<CampusEvent> get current => _events.where(_canSee).toList();
 
   /// Emulates FirebaseFirestore.instance.collection('Events').add(...).
   Future<void> addEvent(CampusEvent event) async {
     await Future.delayed(const Duration(milliseconds: 400));
     _events.insert(0, event);
-    _controller.add(List.unmodifiable(_events));
+    _emitEvents();
   }
 
   // ---- Event publish requests (regular users → admin approval) ----

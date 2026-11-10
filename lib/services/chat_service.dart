@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/chat.dart';
+import '../models/contact.dart';
 import 'auth_service.dart';
 import 'notification_service.dart';
+import 'report_service.dart';
 
 /// Mock store for private buyer↔seller conversations + admin broadcasts
 /// (mirrors a Firestore `Conversations` collection scoped by participant ids).
@@ -26,6 +28,14 @@ class ChatService extends ChangeNotifier {
   final Map<String, DateTime> _lastRead = {};
   DateTime? _broadcastLastRead;
 
+  /// Conversation ids a user has removed from their contact list. The thread is
+  /// hidden from that user only; a new incoming message brings it back.
+  final Map<String, Set<String>> _hiddenThreads = {};
+
+  /// blocker uid → uids they have blocked. Blocking is one-directional to store
+  /// but enforced both ways so neither party can message the other.
+  final Map<String, Set<String>> _blocked = {};
+
   /// Returns the existing conversation between [buyerId] and [sellerId] about
   /// [itemId], creating it on first message. The conversation is keyed so each
   /// buyer↔seller↔item triple gets its own private thread.
@@ -36,32 +46,142 @@ class ChatService extends ChangeNotifier {
     required String sellerId,
   }) {
     final id = '${itemId}_${buyerId}_$sellerId';
-    return _conversations.firstWhere(
+    final convo = _conversations.firstWhere(
       (c) => c.id == id,
       orElse: () {
-        final convo = Conversation(
+        final created = Conversation(
           id: id,
           itemId: itemId,
           itemTitle: itemTitle,
           buyerId: buyerId,
           sellerId: sellerId,
         );
-        _conversations.add(convo);
+        _conversations.add(created);
         notifyListeners();
-        return convo;
+        return created;
       },
     );
+    // Explicitly opening a thread brings it back into the contact list.
+    final unhidden = _hiddenFor(buyerId).remove(id);
+    final alsoUnhidden = _hiddenFor(sellerId).remove(id);
+    if (unhidden || alsoUnhidden) notifyListeners();
+    return convo;
   }
 
   /// All conversations [uid] takes part in, most-recently-active first.
+  ///
+  /// Threads the user removed and conversations with blocked users are hidden.
   List<Conversation> conversationsFor(String uid) {
-    final list = _conversations.where((c) => c.includes(uid)).toList()
+    final hidden = _hiddenThreads[uid] ?? const <String>{};
+    final list = _conversations
+        .where((c) =>
+            c.includes(uid) &&
+            !hidden.contains(c.id) &&
+            !isBlockedBetween(uid, c.otherParty(uid)))
+        .toList()
       ..sort((a, b) {
         final at = a.messages.isEmpty ? DateTime(0) : a.messages.last.sentAt;
         final bt = b.messages.isEmpty ? DateTime(0) : b.messages.last.sentAt;
         return bt.compareTo(at);
       });
     return list;
+  }
+
+  /// One [Contact] per person [uid] has a visible conversation with, newest
+  /// activity first.
+  List<Contact> contactsFor(String uid) {
+    final grouped = <String, List<Conversation>>{};
+    for (final c in conversationsFor(uid)) {
+      grouped.putIfAbsent(c.otherParty(uid), () => []).add(c);
+    }
+    final contacts = grouped.entries
+        .map((e) => Contact(uid: e.key, conversations: e.value))
+        .toList()
+      ..sort((a, b) {
+        final at = a.lastActivity ?? DateTime(0);
+        final bt = b.lastActivity ?? DateTime(0);
+        return bt.compareTo(at);
+      });
+    return contacts;
+  }
+
+  /// Removes [otherUid] from [uid]'s contact list by hiding their threads.
+  /// This does not block them — a new message will surface the thread again.
+  void removeContact(String uid, String otherUid) {
+    final hidden = _hiddenFor(uid);
+    for (final c in _conversations) {
+      if (c.includes(uid) && c.includes(otherUid)) hidden.add(c.id);
+    }
+    notifyListeners();
+  }
+
+  /// Blocks [otherUid] so neither party can send messages to the other.
+  void blockContact(String uid, String otherUid) {
+    if (uid.isEmpty || otherUid.isEmpty || uid == otherUid) return;
+    _blocked.putIfAbsent(uid, () => <String>{}).add(otherUid);
+    notifyListeners();
+  }
+
+  /// Lifts a block [uid] previously placed on [otherUid].
+  void unblockContact(String uid, String otherUid) {
+    _blocked[uid]?.remove(otherUid);
+    notifyListeners();
+  }
+
+  /// True if [blockerId] has explicitly blocked [blockedId].
+  bool hasBlocked(String blockerId, String blockedId) =>
+      _blocked[blockerId]?.contains(blockedId) ?? false;
+
+  /// True if either [a] or [b] has blocked the other.
+  bool isBlockedBetween(String a, String b) =>
+      hasBlocked(a, b) || hasBlocked(b, a);
+
+  /// Whether [viewerId] may see content authored by [authorId].
+  ///
+  /// Blocking is symmetric for visibility: if either side blocked the other,
+  /// neither sees the other's posts. Admins bypass this for moderation.
+  bool canSeeContentFrom(String viewerId, String authorId) {
+    if (viewerId.isEmpty || authorId.isEmpty || viewerId == authorId) {
+      return true;
+    }
+    if (AuthService.instance.profileForUid(viewerId)?.isAdmin ?? false) {
+      return true;
+    }
+    return !isBlockedBetween(viewerId, authorId);
+  }
+
+  /// Convenience wrapper around [canSeeContentFrom] for the signed-in user.
+  bool canSeeContentFromCurrentUser(String authorId) {
+    final viewerId = AuthService.instance.currentUser?.uid ?? '';
+    return canSeeContentFrom(viewerId, authorId);
+  }
+
+  /// Uids that [uid] has blocked.
+  List<String> blockedContactsFor(String uid) =>
+      (_blocked[uid] ?? const <String>{}).toList();
+
+  /// Records a moderation report against [reportedUid] for admin review.
+  void reportContact(
+    String reporterId,
+    String reportedUid,
+    String reason, {
+    String? conversationId,
+  }) {
+    if (reporterId.isEmpty ||
+        reportedUid.isEmpty ||
+        reporterId == reportedUid) {
+      return;
+    }
+    final convo = conversationId == null ? null : _byId(conversationId);
+    ReportService.instance.submitContact(
+      reporterId: reporterId,
+      reportedUid: reportedUid,
+      reason: reason,
+      reporterName: AuthService.instance.nameForUid(reporterId),
+      reportedName: AuthService.instance.nameForUid(reportedUid),
+      conversationId: conversationId,
+      contextLabel: convo?.itemTitle,
+    );
   }
 
   Stream<List<ChatMessage>> messages(String conversationId) {
@@ -80,20 +200,29 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Sends [text] from [senderId]. Rejects senders who aren't a participant.
-  void send(String conversationId, String senderId, String text) {
+  ///
+  /// Returns true when the message was appended, false when the send was
+  /// rejected (empty text, non-participant, or either side blocked).
+  bool send(String conversationId, String senderId, String text) {
     final convo = _byId(conversationId);
     if (convo == null || !convo.includes(senderId) || text.trim().isEmpty) {
-      return;
+      return false;
     }
+    final recipient = convo.otherParty(senderId);
+    // Blocking stops contact in both directions.
+    if (isBlockedBetween(senderId, recipient)) return false;
+
     convo.messages.add(ChatMessage(
       id: 'm_${DateTime.now().microsecondsSinceEpoch}',
       senderId: senderId,
       text: text.trim(),
     ));
+    // A new message brings a previously removed thread back for both parties.
+    _hiddenFor(recipient).remove(conversationId);
+    _hiddenFor(senderId).remove(conversationId);
     _controllers[conversationId]?.add(List.unmodifiable(convo.messages));
 
     // Notify the recipient so they see it in their bell + message badge.
-    final recipient = convo.otherParty(senderId);
     final senderName = AuthService.instance.nameForUid(senderId);
     NotificationService.instance.push(
       userId: recipient,
@@ -103,6 +232,7 @@ class ChatService extends ChangeNotifier {
       targetId: convo.id,
     );
     notifyListeners();
+    return true;
   }
 
   // ---- Admin broadcasts ----
@@ -170,6 +300,9 @@ class ChatService extends ChangeNotifier {
     _broadcastLastRead = DateTime.now();
     notifyListeners();
   }
+
+  Set<String> _hiddenFor(String uid) =>
+      _hiddenThreads.putIfAbsent(uid, () => <String>{});
 
   Conversation? _byId(String id) {
     for (final c in _conversations) {
