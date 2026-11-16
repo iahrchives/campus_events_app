@@ -8,6 +8,8 @@ enum AppNotificationType {
   forumReaction,
   message,
   announcement,
+  eventApproved,
+  eventRejected,
   report,
   system,
 }
@@ -23,6 +25,10 @@ extension AppNotificationTypeX on AppNotificationType {
         return Icons.chat_bubble_outline;
       case AppNotificationType.announcement:
         return Icons.campaign_outlined;
+      case AppNotificationType.eventApproved:
+        return Icons.event_available_outlined;
+      case AppNotificationType.eventRejected:
+        return Icons.event_busy_outlined;
       case AppNotificationType.report:
         return Icons.flag_outlined;
       case AppNotificationType.system:
@@ -40,6 +46,10 @@ extension AppNotificationTypeX on AppNotificationType {
         return AppColors.secondary;
       case AppNotificationType.announcement:
         return AppColors.success;
+      case AppNotificationType.eventApproved:
+        return AppColors.success;
+      case AppNotificationType.eventRejected:
+        return AppColors.danger;
       case AppNotificationType.report:
         return AppColors.danger;
       case AppNotificationType.system:

@@ -75,7 +75,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             color: AppColors.textMuted,
                             fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
-                    Text('Replies and reactions to your posts show up here.',
+                    Text(
+                        'Replies, reactions and room reservation updates '
+                        'show up here.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 12.5, color: AppColors.textMuted)),

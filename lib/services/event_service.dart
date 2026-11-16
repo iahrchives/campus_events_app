@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../models/event.dart';
 import 'chat_service.dart';
+import 'notification_service.dart';
 
 /// Mock events store exposing a broadcast [Stream] so screens can use
 /// `StreamBuilder` exactly like they will with Firestore (see README → Step 3).
@@ -111,7 +112,8 @@ class EventService {
     _reqController.add(List.unmodifiable(_requests));
   }
 
-  /// Admin approves a request → publishes it as a real event.
+  /// Admin approves a request → publishes it as a real event and notifies the
+  /// organizer (PBI-11).
   Future<void> approveRequest({
     required String requestId,
     required String adminId,
@@ -119,8 +121,10 @@ class EventService {
     final req = _requests.firstWhere((r) => r.id == requestId);
     req.status = RequestStatus.approved;
     _reqController.add(List.unmodifiable(_requests));
+
+    final eventId = 'evt_${DateTime.now().millisecondsSinceEpoch}';
     await addEvent(CampusEvent(
-      id: 'evt_${DateTime.now().millisecondsSinceEpoch}',
+      id: eventId,
       title: req.title,
       description: req.description,
       venue: req.venue,
@@ -129,12 +133,35 @@ class EventService {
       organizerID: req.requesterId,
       imageURL: req.imageURL,
     ));
+    _notifyBookingDecision(req, approved: true, eventId: eventId);
   }
 
+  /// Admin rejects a request → notifies the organizer (PBI-11).
   Future<void> declineRequest(String requestId) async {
     await Future.delayed(const Duration(milliseconds: 150));
-    _requests.firstWhere((r) => r.id == requestId).status =
-        RequestStatus.declined;
+    final req = _requests.firstWhere((r) => r.id == requestId);
+    req.status = RequestStatus.declined;
     _reqController.add(List.unmodifiable(_requests));
+    _notifyBookingDecision(req, approved: false);
+  }
+
+  /// Pushes the automatic in-app booking decision notification to the organizer.
+  void _notifyBookingDecision(
+    EventRequest req, {
+    required bool approved,
+    String? eventId,
+  }) {
+    NotificationService.instance.push(
+      userId: req.requesterId,
+      type: approved
+          ? AppNotificationType.eventApproved
+          : AppNotificationType.eventRejected,
+      title: approved
+          ? 'Room reservation approved'
+          : 'Room reservation rejected',
+      body: '"${req.title}" at ${req.venue} on ${req.date}, ${req.time} '
+          'was ${approved ? 'approved' : 'not approved'}.',
+      targetId: eventId ?? req.id,
+    );
   }
 }
