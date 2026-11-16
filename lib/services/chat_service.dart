@@ -235,6 +235,86 @@ class ChatService extends ChangeNotifier {
     return true;
   }
 
+  // ---- Message reactions and deletion ----
+
+  /// Adds, changes, or removes the current user's reaction.
+  /// Tapping the same emoji twice removes that user's reaction.
+  bool toggleReaction(
+      String conversationId,
+      String messageId,
+      String uid,
+      String emoji,
+      ) {
+    final convo = _byId(conversationId);
+    if (convo == null || !convo.includes(uid) || emoji.trim().isEmpty) {
+      return false;
+    }
+
+    final message = _messageById(convo, messageId);
+    if (message == null ||
+        message.deletedForEveryone ||
+        message.deletedFor.contains(uid)) {
+      return false;
+    }
+
+    if (message.reactions[uid] == emoji) {
+      message.reactions.remove(uid);
+    } else {
+      message.reactions[uid] = emoji;
+    }
+
+    _publishMessages(convo);
+    return true;
+  }
+
+  /// Hides a message only for [uid].
+  bool deleteMessageForMe(
+      String conversationId,
+      String messageId,
+      String uid,
+      ) {
+    final convo = _byId(conversationId);
+    if (convo == null || !convo.includes(uid)) return false;
+
+    final message = _messageById(convo, messageId);
+    if (message == null || message.deletedForEveryone) return false;
+
+    message.deletedFor.add(uid);
+    message.reactions.remove(uid);
+    _publishMessages(convo);
+    return true;
+  }
+
+  /// Hides a message for both participants. Only its original sender may do this.
+  bool deleteMessageForEveryone(
+      String conversationId,
+      String messageId,
+      String requesterUid,
+      ) {
+    final convo = _byId(conversationId);
+    if (convo == null || !convo.includes(requesterUid)) return false;
+
+    final message = _messageById(convo, messageId);
+    if (message == null || message.senderId != requesterUid) return false;
+
+    message.deletedForEveryone = true;
+    message.reactions.clear();
+    _publishMessages(convo);
+    return true;
+  }
+
+  ChatMessage? _messageById(Conversation convo, String messageId) {
+    for (final message in convo.messages) {
+      if (message.id == messageId) return message;
+    }
+    return null;
+  }
+
+  void _publishMessages(Conversation convo) {
+    _controllers[convo.id]?.add(List.unmodifiable(convo.messages));
+    notifyListeners();
+  }
+
   // ---- Admin broadcasts ----
   List<BroadcastMessage> get broadcasts => List.unmodifiable(
         _broadcasts.reversed,

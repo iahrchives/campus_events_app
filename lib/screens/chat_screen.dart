@@ -232,6 +232,286 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  static const List<String> _availableReactions = [
+    '❤️', '😂', '😮', '😢', '👍', '👎',
+  ];
+
+  Future<void> _addReaction(ChatMessage message) async {
+    final emoji = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'React to message',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                children: _availableReactions.map((emoji) {
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () => Navigator.pop(sheetContext, emoji),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || emoji == null) return;
+    final uid = AuthService.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    ChatService.instance.toggleReaction(
+      widget.conversation.id,
+      message.id,
+      uid,
+      emoji,
+    );
+  }
+
+  Future<void> _showMessageActions(ChatMessage message, bool isMe) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.add_reaction_outlined),
+              title: const Text('Add reaction'),
+              onTap: () => Navigator.pop(sheetContext, 'react'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete for me'),
+              onTap: () => Navigator.pop(sheetContext, 'delete_me'),
+            ),
+            if (isMe)
+              ListTile(
+                leading: const Icon(Icons.delete_forever_outlined,
+                    color: AppColors.danger),
+                title: const Text(
+                  'Delete for everyone',
+                  style: TextStyle(color: AppColors.danger),
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'delete_everyone'),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || action == null) return;
+
+    final uid = AuthService.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    if (action == 'react') {
+      await _addReaction(message);
+    } else if (action == 'delete_me') {
+      ChatService.instance.deleteMessageForMe(
+        widget.conversation.id,
+        message.id,
+        uid,
+      );
+    } else if (action == 'delete_everyone') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete for everyone?'),
+          content: const Text(
+            'This message will be removed from the conversation for both people.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text(
+                'Delete',
+                style: TextStyle(color: AppColors.danger),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true && mounted) {
+        ChatService.instance.deleteMessageForEveryone(
+          widget.conversation.id,
+          message.id,
+          uid,
+        );
+      }
+    }
+  }
+
+  Widget _buildReactionBar(ChatMessage message, String currentUid) {
+    final counts = <String, int>{};
+    for (final emoji in message.reactions.values) {
+      counts[emoji] = (counts[emoji] ?? 0) + 1;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 5),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 5,
+            runSpacing: 4,
+            children: counts.entries.map((entry) {
+              final selected = message.reactions[currentUid] == entry.key;
+              return InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  ChatService.instance.toggleReaction(
+                    widget.conversation.id,
+                    message.id,
+                    currentUid,
+                    entry.key,
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? AppColors.primary.withValues(alpha: 0.14)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.surfaceTint.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Text(
+                    '${entry.key} ${entry.value}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            padding: EdgeInsets.zero,
+            tooltip: 'Add reaction',
+            icon: Icon(
+              Icons.add_reaction_outlined,
+              size: 18,
+              color: AppColors.textMuted,
+            ),
+            onPressed: () => _addReaction(message),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageItem(ChatMessage message, String currentUid) {
+    final isMe = message.senderId == currentUid;
+
+    if (message.deletedForEveryone ||
+        message.deletedFor.contains(currentUid)) {
+      return const SizedBox.shrink();
+    }
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: GestureDetector(
+        onLongPress: () => _showMessageActions(message, isMe),
+        child: Column(
+          crossAxisAlignment:
+          isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.72,
+              ),
+              decoration: BoxDecoration(
+                color: isMe ? AppColors.primary : Colors.white,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isMe ? 16 : 0),
+                  bottomRight: Radius.circular(isMe ? 0 : 16),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Text(
+                message.text,
+                style: TextStyle(
+                  color: isMe ? Colors.white : AppColors.textDark,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            if (message.reactions.isNotEmpty)
+              _buildReactionBar(message, currentUid)
+            else
+              Align(
+                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: IconButton(
+                    visualDensity: VisualDensity.compact,
+                    constraints:
+                    const BoxConstraints(minWidth: 32, minHeight: 28),
+                    padding: EdgeInsets.zero,
+                    tooltip: 'Add reaction',
+                    icon: Icon(
+                      Icons.add_reaction_outlined,
+                      size: 17,
+                      color: AppColors.textMuted,
+                    ),
+                    onPressed: () => _addReaction(message),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final convo = widget.conversation;
@@ -336,7 +616,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
 
-          // Message Thread Stream
+
+// Message Thread Stream
           Expanded(
             child: StreamBuilder<List<ChatMessage>>(
               stream: ChatService.instance.messages(convo.id),
@@ -351,7 +632,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Text(
                         'Say hello to start the conversation about\n"${convo.itemTitle}".',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   );
@@ -359,50 +643,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 return ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final msg = messages[index];
-                    final isMe = msg.senderId == currentUid;
-
-                    return Align(
-                      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.72,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isMe ? AppColors.primary : Colors.white,
-                          borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(16),
-                            topRight: const Radius.circular(16),
-                            bottomLeft: Radius.circular(isMe ? 16 : 0),
-                            bottomRight: Radius.circular(isMe ? 0 : 16),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.04),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          msg.text,
-                          style: TextStyle(
-                            color: isMe ? Colors.white : AppColors.textDark,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildMessageItem(msg, currentUid);
                   },
                 );
               },
             ),
           ),
+
 
           if (!isBlocked) ...[
             // PBI-3: Quick-Reply Bar (Naka-linya pababa)

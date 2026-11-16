@@ -1,16 +1,25 @@
+
 /// A single message inside a private buyer↔seller conversation.
 class ChatMessage {
   final String id;
   final String senderId;
   final String text;
   final DateTime sentAt;
+  final Map<String, String> reactions;
+  final Set<String> deletedFor;
+  bool deletedForEveryone;
 
   ChatMessage({
     required this.id,
     required this.senderId,
     required this.text,
     DateTime? sentAt,
-  }) : sentAt = sentAt ?? DateTime.now();
+    Map<String, String>? reactions,
+    Set<String>? deletedFor,
+    this.deletedForEveryone = false,
+  })  : sentAt = sentAt ?? DateTime.now(),
+        reactions = reactions ?? <String, String>{},
+        deletedFor = deletedFor ?? <String>{};
 }
 
 /// A private 1-on-1 conversation about a marketplace listing. Only the two
