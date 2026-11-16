@@ -71,7 +71,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
   }
 
   void _openConversation(Conversation c) {
-    ChatService.instance.markConversationRead(c.id);
+    ChatService.instance.markConversationRead(c.id, _uid);
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ChatScreen(conversation: c)),
@@ -222,14 +222,26 @@ class _MessagesScreenState extends State<MessagesScreen> {
     );
   }
 
+  Widget _deliveryIcon(MessageDeliveryState state) {
+    switch (state) {
+      case MessageDeliveryState.sent:
+        return Icon(Icons.check, size: 13, color: AppColors.textMuted);
+      case MessageDeliveryState.delivered:
+        return Icon(Icons.done_all, size: 13, color: AppColors.textMuted);
+      case MessageDeliveryState.read:
+        return Icon(Icons.done_all, size: 13, color: AppColors.primary);
+    }
+  }
+
   Widget _conversationTile(Conversation c) {
     final otherId = c.otherParty(_uid);
     final otherName = AuthService.instance.nameForUid(otherId);
     final otherPhoto = AuthService.instance.profileForUid(otherId)?.photoURL;
     final last = c.messages.isEmpty ? null : c.messages.last;
+    final isMine = last?.senderId == _uid;
     final preview = last == null
         ? 'No messages yet'
-        : '${last.senderId == _uid ? "You: " : ""}${last.text}';
+        : '${isMine ? "You: " : ""}${last.text}';
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: SoftCard(
@@ -268,11 +280,25 @@ class _MessagesScreenState extends State<MessagesScreen> {
                           fontWeight: FontWeight.w600,
                           color: AppColors.primary)),
                   const SizedBox(height: 2),
-                  Text(preview,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12.5, color: AppColors.textMuted)),
+                  Row(
+                    children: [
+                      if (isMine && last != null) ...[
+                        _deliveryIcon(
+                          ChatService.instance
+                              .visibleStateFor(last, otherId),
+                        ),
+                        const SizedBox(width: 3),
+                      ],
+                      Expanded(
+                        child: Text(preview,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                color: AppColors.textMuted)),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

@@ -6,6 +6,7 @@ import '../models/chat.dart';
 import '../models/contact.dart';
 import 'auth_service.dart';
 import 'notification_service.dart';
+import 'presence_service.dart';
 import 'report_service.dart';
 
 /// Mock store for private buyer↔seller conversations + admin broadcasts
@@ -14,11 +15,18 @@ import 'report_service.dart';
 /// Extends [ChangeNotifier] so the nav-bar message badge and the inbox update
 /// live whenever a message arrives or a thread is opened/read.
 class ChatService extends ChangeNotifier {
-  ChatService._();
+  ChatService._() {
+    PresenceService.instance.addListener(_onPresenceChanged);
+    _onPresenceChanged();
+  }
+
   static final ChatService instance = ChatService._();
 
   final List<Conversation> _conversations = [];
   final Map<String, StreamController<List<ChatMessage>>> _controllers = {};
+
+  /// Per-user "Read Receipts" privacy preference (default enabled).
+  final Map<String, bool> _readReceiptsEnabled = {};
 
   /// Admin → everyone broadcast messages, visible to every signed-in user.
   final List<BroadcastMessage> _broadcasts = [];
@@ -212,10 +220,14 @@ class ChatService extends ChangeNotifier {
     // Blocking stops contact in both directions.
     if (isBlockedBetween(senderId, recipient)) return false;
 
+    final now = DateTime.now();
     convo.messages.add(ChatMessage(
-      id: 'm_${DateTime.now().microsecondsSinceEpoch}',
+      id: 'm_${now.microsecondsSinceEpoch}',
       senderId: senderId,
       text: text.trim(),
+      // Saved to the store immediately = Sent. If the recipient is already
+      // active, their device has received it = Delivered right away.
+      deliveredAt: PresenceService.instance.isOnline(recipient) ? now : null,
     ));
     // A new message brings a previously removed thread back for both parties.
     _hiddenFor(recipient).remove(conversationId);
@@ -356,7 +368,7 @@ class ChatService extends ChangeNotifier {
     for (final c in conversationsFor(uid)) {
       if (c.messages.isEmpty) continue;
       final last = c.messages.last;
-      final seenAt = _lastRead[c.id];
+      final seenAt = _lastRead['$uid:${c.id}'];
       if (last.senderId != uid &&
           (seenAt == null || last.sentAt.isAfter(seenAt))) {
         count++;
@@ -371,9 +383,94 @@ class ChatService extends ChangeNotifier {
     return count;
   }
 
-  void markConversationRead(String conversationId) {
-    _lastRead[conversationId] = DateTime.now();
+  /// Marks the thread seen for [uid] and advances the read receipts on every
+  /// incoming message (including delivery if it had not arrived yet).
+  ///
+  /// Timestamps are always recorded so unread badges stay correct; whether the
+  /// sender is shown "Read" is capped by [visibleStateFor] using the reader's
+  /// Read Receipts preference.
+  void markConversationRead(String conversationId, String uid) {
+    if (uid.isEmpty) return;
+    final now = DateTime.now();
+    final key = '$uid:$conversationId';
+    var changed = _lastRead[key] == null;
+    _lastRead[key] = now;
+
+    final convo = _byId(conversationId);
+    if (convo != null) {
+      for (final message in convo.messages) {
+        if (message.senderId == uid || message.deletedForEveryone) continue;
+        if (message.deliveredAt == null) {
+          message.deliveredAt = now;
+          changed = true;
+        }
+        if (message.readAt == null) {
+          message.readAt = now;
+          changed = true;
+        }
+      }
+    }
+
+    if (!changed) return;
+    if (convo != null) {
+      _publishMessages(convo);
+    } else {
+      notifyListeners();
+    }
+  }
+
+  // ---- Delivery + read receipts ----
+
+  /// Whether [uid] shows read receipts to the people they chat with.
+  bool readReceiptsEnabledFor(String uid) =>
+      _readReceiptsEnabled[uid] ?? true;
+
+  /// Updates [uid]'s Read Receipts privacy preference.
+  void setReadReceiptsEnabled(String uid, bool enabled) {
+    if (uid.isEmpty) return;
+    if (readReceiptsEnabledFor(uid) == enabled) return;
+    _readReceiptsEnabled[uid] = enabled;
     notifyListeners();
+  }
+
+  /// The state [recipientUid]'s device lets the sender see for [message].
+  ///
+  /// When the recipient disabled read receipts the state is capped at
+  /// "Delivered", even though the message may already be read internally.
+  MessageDeliveryState visibleStateFor(
+    ChatMessage message,
+    String recipientUid,
+  ) {
+    if (message.readAt != null && readReceiptsEnabledFor(recipientUid)) {
+      return MessageDeliveryState.read;
+    }
+    if (message.deliveredAt != null) {
+      return MessageDeliveryState.delivered;
+    }
+    return MessageDeliveryState.sent;
+  }
+
+  /// Marks every incoming message for [uid] as delivered (called when the
+  /// recipient's device becomes active).
+  void _markDeliveredFor(String uid) {
+    if (uid.isEmpty) return;
+    final now = DateTime.now();
+    for (final convo in _conversations) {
+      if (!convo.includes(uid)) continue;
+      var changed = false;
+      for (final message in convo.messages) {
+        if (message.senderId == uid || message.deliveredAt != null) continue;
+        message.deliveredAt = now;
+        changed = true;
+      }
+      if (changed) _publishMessages(convo);
+    }
+  }
+
+  void _onPresenceChanged() {
+    for (final uid in PresenceService.instance.onlineUids) {
+      _markDeliveredFor(uid);
+    }
   }
 
   void markBroadcastsRead() {

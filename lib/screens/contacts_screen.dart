@@ -18,7 +18,7 @@ class ContactsScreen extends StatelessWidget {
 
   void _openChat(BuildContext context, Contact contact) {
     final convo = contact.latest;
-    ChatService.instance.markConversationRead(convo.id);
+    ChatService.instance.markConversationRead(convo.id, _uid);
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ChatScreen(conversation: convo)),

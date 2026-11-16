@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import '../models/chat.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
+import '../services/presence_service.dart';
 import '../theme/theme.dart';
 import '../widgets/contact_actions.dart';
+import '../widgets/forum_widgets.dart';
 import '../widgets/user_avatar.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -42,15 +44,34 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    ChatService.instance.markConversationRead(widget.conversation.id);
+    final uid = AuthService.instance.currentUser?.uid ?? '';
+    ChatService.instance.markConversationRead(widget.conversation.id, uid);
+    ChatService.instance.addListener(_onChatChanged);
   }
 
   @override
   void dispose() {
+    ChatService.instance.removeListener(_onChatChanged);
     _cooldownTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Keep the thread read while it is open (e.g. an incoming message arrives).
+  void _onChatChanged() {
+    if (!mounted) return;
+    final uid = AuthService.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+    final convo = widget.conversation;
+    final hasUnreadIncoming = convo.messages.any((m) =>
+        m.senderId != uid &&
+        m.readAt == null &&
+        !m.deletedForEveryone &&
+        !m.deletedFor.contains(uid));
+    if (hasUnreadIncoming) {
+      ChatService.instance.markConversationRead(convo.id, uid);
+    }
   }
 
   void _scrollToBottom() {
@@ -436,7 +457,103 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageItem(ChatMessage message, String currentUid) {
+  /// PBI-7: presence line under the contact name in the chat header.
+  Widget _buildPresenceLine(String otherUid) {
+    return AnimatedBuilder(
+      animation: PresenceService.instance,
+      builder: (context, _) {
+        if (!PresenceService.instance.canShowStatus(otherUid)) {
+          return const SizedBox.shrink();
+        }
+        final online = PresenceService.instance.isOnline(otherUid);
+        final lastSeen = PresenceService.instance.lastSeenFor(otherUid);
+        final relative = lastSeen == null ? null : timeAgo(lastSeen);
+        final label = online
+            ? 'Online'
+            : relative == null
+                ? 'Offline'
+                : relative == 'just now'
+                    ? 'Last seen just now'
+                    : 'Last seen $relative ago';
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: online ? AppColors.success : Colors.white70,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  height: 1.0,
+                  color: online ? Colors.white : Colors.white70,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// PBI-6: Sent / Delivered / Read indicator for the user's own messages.
+  Widget _buildStatusLine(ChatMessage message, String recipientUid) {
+    final state = ChatService.instance.visibleStateFor(message, recipientUid);
+    final IconData icon;
+    final String label;
+    final Color color;
+    switch (state) {
+      case MessageDeliveryState.sent:
+        icon = Icons.check;
+        label = 'Sent';
+        color = AppColors.textMuted;
+        break;
+      case MessageDeliveryState.delivered:
+        icon = Icons.done_all;
+        label = 'Delivered';
+        color = AppColors.textMuted;
+        break;
+      case MessageDeliveryState.read:
+        icon = Icons.done_all;
+        label = 'Read';
+        color = AppColors.primary;
+        break;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, right: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageItem(
+    ChatMessage message,
+    String currentUid,
+    String otherUid,
+  ) {
     final isMe = message.senderId == currentUid;
 
     if (message.deletedForEveryone ||
@@ -483,6 +600,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
+            if (isMe && !message.deletedForEveryone)
+              _buildStatusLine(message, otherUid),
             if (message.reactions.isNotEmpty)
               _buildReactionBar(message, currentUid)
             else
@@ -526,6 +645,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       backgroundColor: AppColors.neutralLight,
       appBar: AppBar(
+        toolbarHeight: 70,
         titleSpacing: 0,
         actions: [
           PopupMenuButton<String>(
@@ -554,13 +674,24 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   Text(
                     otherName,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      height: 1.05,
+                      fontWeight: FontWeight.w700,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
+                  _buildPresenceLine(otherUid),
                   if (convo.itemTitle.isNotEmpty)
                     Text(
                       convo.itemTitle,
-                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                      maxLines: 1,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        height: 1.0,
+                        color: Colors.white70,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                 ],
@@ -650,7 +781,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final msg = messages[index];
-                    return _buildMessageItem(msg, currentUid);
+                    return _buildMessageItem(msg, currentUid, otherUid);
                   },
                 );
               },

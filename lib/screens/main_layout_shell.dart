@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/presence_service.dart';
 import '../services/report_service.dart';
 import '../services/settings_controller.dart';
 import '../theme/theme.dart';
@@ -22,8 +23,7 @@ import 'settings_screen.dart';
 import 'verification_admin_screen.dart';
 import 'welcome_screen.dart';
 
-/// Persistent navigation shell. Swapping drawer items updates the body view
-/// without destroying the shell context (single Scaffold, indexed body).
+/// Persistent navigation shell. Swapping drawer items updates the body view without destroying the shell context (single Scaffold, indexed body).
 class MainLayoutShell extends StatefulWidget {
   const MainLayoutShell({super.key});
 
@@ -38,12 +38,14 @@ class _NavEntry {
   const _NavEntry(this.label, this.icon, this.page);
 }
 
-class _MainLayoutShellState extends State<MainLayoutShell> {
+class _MainLayoutShellState extends State<MainLayoutShell>
+    with WidgetsBindingObserver {
   int _index = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Rebuild when settings (dark mode) OR the auth/verification state change,
     // so the theme re-applies and the nav re-gates after admin approval.
     // Also rebuild on new notifications/messages to refresh the nav badges.
@@ -56,12 +58,26 @@ class _MainLayoutShellState extends State<MainLayoutShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     SettingsController.instance.removeListener(_onChanged);
     AuthService.instance.removeListener(_onChanged);
     NotificationService.instance.removeListener(_onChanged);
     ChatService.instance.removeListener(_onChanged);
     ReportService.instance.removeListener(_onChanged);
     super.dispose();
+  }
+
+  /// PBI-7: keep presence in sync with the actual app lifecycle.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final uid = AuthService.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+    if (state == AppLifecycleState.resumed) {
+      PresenceService.instance.markOnline(uid);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      PresenceService.instance.markOffline(uid);
+    }
   }
 
   void _onChanged() {

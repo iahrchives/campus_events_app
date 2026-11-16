@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
+import '../services/chat_service.dart';
+import '../services/presence_service.dart';
 import '../services/settings_controller.dart';
 import '../theme/theme.dart';
 import '../widgets/soft_card.dart';
@@ -18,6 +20,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _s = SettingsController.instance;
+
+  String get _uid => AuthService.instance.currentUser?.uid ?? '';
 
   @override
   Widget build(BuildContext context) {
@@ -77,14 +81,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           _navTile(
-            icon: Icons.lock_outline,
-            title: 'Privacy',
-            onTap: () => _info('Privacy controls coming soon.'),
-          ),
-          _navTile(
             icon: Icons.info_outline,
             title: 'About',
             onTap: _showAbout,
+          ),
+          const SizedBox(height: 18),
+          _section('Privacy'),
+          _switchTile(
+            icon: Icons.done_all,
+            title: 'Read Receipts',
+            subtitle: "Show when you've read someone's message",
+            value: ChatService.instance.readReceiptsEnabledFor(_uid),
+            onChanged: (v) => setState(
+                () => ChatService.instance.setReadReceiptsEnabled(_uid, v)),
+          ),
+          _switchTile(
+            icon: Icons.circle_outlined,
+            title: 'Active Status',
+            subtitle: 'Show when you are online or last active',
+            value: PresenceService.instance.activeStatusEnabledFor(_uid),
+            onChanged: (v) => setState(
+                () => PresenceService.instance.setActiveStatusEnabled(_uid, v)),
           ),
           if (!AuthService.instance.isAdmin) ...[
             const SizedBox(height: 18),
@@ -223,9 +240,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (chosen != null) setState(() => _s.setLanguage(chosen));
   }
-
-  void _info(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(msg)));
 
   void _showAbout() {
     showAboutDialog(
