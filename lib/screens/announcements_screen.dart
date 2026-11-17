@@ -32,7 +32,7 @@ class AnnouncementsScreen extends StatelessWidget {
         title: const Text('Announcements'),
         actions: [
           if (isAdmin)
-            // Pending-requests inbox with a live badge.
+          // Pending-requests inbox with a live badge.
             StreamBuilder<List<AnnouncementRequest>>(
               stream: AnnouncementService.instance.requestStream,
               initialData: AnnouncementService.instance.requests,
@@ -50,7 +50,7 @@ class AnnouncementsScreen extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                             builder: (_) =>
-                                const AnnouncementRequestsScreen()),
+                            const AnnouncementRequestsScreen()),
                       ),
                     ),
                     if (pending > 0)
@@ -77,7 +77,7 @@ class AnnouncementsScreen extends StatelessWidget {
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.primary,
         icon: Icon(isAdmin ? Icons.campaign : Icons.edit_note),
-        label: Text(isAdmin ? 'Post' : 'Request'),
+        label: Text(isAdmin ? 'Post Broadcast' : 'Request'),
         onPressed: () => _compose(context, isAdmin),
       ),
       body: Column(
@@ -122,8 +122,8 @@ class AnnouncementsScreen extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Only admins can post announcements. Tap “Request” to ask an '
-              'admin to publish one for you.',
+              'Only authorized admins can post campus-wide broadcasts. Tap '
+                  '“Request” to ask an admin to publish one for you.',
               style: TextStyle(fontSize: 12.5, color: AppColors.textDark),
             ),
           ),
@@ -134,6 +134,10 @@ class AnnouncementsScreen extends StatelessWidget {
 
   Widget _card(BuildContext context, Announcement a) {
     final date = DateFormat('MMM d · h:mm a').format(a.createdAt);
+    final Color badgeColor = a.isEmergency
+        ? AppColors.danger
+        : (a.isUrgent ? Colors.deepOrange : AppColors.primary);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: SoftCard(
@@ -145,17 +149,40 @@ class AnnouncementsScreen extends StatelessWidget {
               height: 46,
               width: 46,
               decoration: BoxDecoration(
-                color: AppColors.surfaceTint,
+                color: a.isUrgent
+                    ? badgeColor.withValues(alpha: 0.14)
+                    : AppColors.surfaceTint,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child:
-                  const Icon(Icons.campaign_rounded, color: AppColors.primary),
+              child: Icon(
+                a.isEmergency
+                    ? Icons.emergency_share_rounded
+                    : (a.isUrgent
+                    ? Icons.notification_important_rounded
+                    : Icons.campaign_rounded),
+                color: badgeColor,
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (a.isUrgent || a.category != 'General') ...[
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (a.isEmergency)
+                          _pillBadge('EMERGENCY', AppColors.danger)
+                        else if (a.isUrgent)
+                          _pillBadge('URGENT', Colors.deepOrange),
+                        if (a.category != 'General')
+                          _pillBadge(a.category.toUpperCase(), AppColors.primary),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                  ],
                   Text(a.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -197,6 +224,24 @@ class AnnouncementsScreen extends StatelessWidget {
             ),
             Icon(Icons.chevron_right, color: AppColors.textMuted),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pillBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: color,
         ),
       ),
     );

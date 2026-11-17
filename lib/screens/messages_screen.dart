@@ -32,7 +32,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.neutralLight,
         shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: const Text('Message everyone'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -94,11 +94,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
   }
 
   Future<void> _handleContactAction(
-    Conversation c,
-    String otherId,
-    String otherName,
-    String action,
-  ) async {
+      Conversation c,
+      String otherId,
+      String otherName,
+      String action,
+      ) async {
     switch (action) {
       case 'report':
         await reportContactFlow(
@@ -133,11 +133,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
       ),
       floatingActionButton: _isAdmin
           ? FloatingActionButton.extended(
-              backgroundColor: AppColors.primary,
-              icon: const Icon(Icons.campaign_outlined),
-              label: const Text('Message all'),
-              onPressed: _composeBroadcast,
-            )
+        backgroundColor: AppColors.primary,
+        icon: const Icon(Icons.campaign_outlined),
+        label: const Text('Message all'),
+        onPressed: _composeBroadcast,
+      )
           : null,
       body: AnimatedBuilder(
         animation: ChatService.instance,
@@ -161,7 +161,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                     const SizedBox(height: 4),
                     Text(
                         'Message a seller from a marketplace listing to start '
-                        'a conversation.',
+                            'a conversation.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 12.5, color: AppColors.textMuted)),
@@ -224,6 +224,9 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Widget _deliveryIcon(MessageDeliveryState state) {
     switch (state) {
+      case MessageDeliveryState.queued:
+        return const Icon(Icons.access_time_rounded,
+            size: 13, color: Colors.deepOrange);
       case MessageDeliveryState.sent:
         return Icon(Icons.check, size: 13, color: AppColors.textMuted);
       case MessageDeliveryState.delivered:

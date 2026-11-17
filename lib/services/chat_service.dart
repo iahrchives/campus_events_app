@@ -9,6 +9,17 @@ import 'notification_service.dart';
 import 'presence_service.dart';
 import 'report_service.dart';
 
+/// Internal queue entry representing a message held locally while offline.
+class _QueuedOutgoingMessage {
+  final String conversationId;
+  final ChatMessage message;
+
+  _QueuedOutgoingMessage({
+    required this.conversationId,
+    required this.message,
+  });
+}
+
 /// Mock store for private buyer↔seller conversations + admin broadcasts
 /// (mirrors a Firestore `Conversations` collection scoped by participant ids).
 ///
@@ -24,6 +35,66 @@ class ChatService extends ChangeNotifier {
 
   final List<Conversation> _conversations = [];
   final Map<String, StreamController<List<ChatMessage>>> _controllers = {};
+
+  /// PBI-8: Simulated/tracked device connectivity state + local offline queue.
+  bool _isDeviceOnline = true;
+  final List<_QueuedOutgoingMessage> _offlineQueue = [];
+
+  bool get isDeviceOnline => _isDeviceOnline;
+  int get queuedMessageCount => _offlineQueue.length;
+
+  /// Toggles device connection state. When connection returns, all locally
+  /// queued messages are automatically flushed and delivered in order.
+  void setDeviceOnline(bool online) {
+    if (_isDeviceOnline == online) return;
+    _isDeviceOnline = online;
+    if (_isDeviceOnline) {
+      flushOfflineQueue();
+    }
+    notifyListeners();
+  }
+
+  /// Sends all locally stored offline messages once connection is restored.
+  void flushOfflineQueue() {
+    if (!_isDeviceOnline || _offlineQueue.isEmpty) return;
+
+    final pending = List<_QueuedOutgoingMessage>.from(_offlineQueue);
+    _offlineQueue.clear();
+    final affectedConversations = <Conversation>{};
+
+    for (final item in pending) {
+      final convo = _byId(item.conversationId);
+      if (convo == null) continue;
+
+      final recipient = convo.otherParty(item.message.senderId);
+      if (isBlockedBetween(item.message.senderId, recipient)) continue;
+
+      final now = DateTime.now();
+      item.message.isQueued = false;
+      if (PresenceService.instance.isOnline(recipient)) {
+        item.message.deliveredAt = now;
+      }
+
+      _hiddenFor(recipient).remove(convo.id);
+      _hiddenFor(item.message.senderId).remove(convo.id);
+
+      final senderName = AuthService.instance.nameForUid(item.message.senderId);
+      NotificationService.instance.push(
+        userId: recipient,
+        type: AppNotificationType.message,
+        title: 'New message from $senderName',
+        body: 'About "${convo.itemTitle}": ${item.message.text}',
+        targetId: convo.id,
+      );
+
+      affectedConversations.add(convo);
+    }
+
+    for (final convo in affectedConversations) {
+      _controllers[convo.id]?.add(List.unmodifiable(convo.messages));
+    }
+    notifyListeners();
+  }
 
   /// Per-user "Read Receipts" privacy preference (default enabled).
   final Map<String, bool> _readReceiptsEnabled = {};
@@ -55,7 +126,7 @@ class ChatService extends ChangeNotifier {
   }) {
     final id = '${itemId}_${buyerId}_$sellerId';
     final convo = _conversations.firstWhere(
-      (c) => c.id == id,
+          (c) => c.id == id,
       orElse: () {
         final created = Conversation(
           id: id,
@@ -83,9 +154,9 @@ class ChatService extends ChangeNotifier {
     final hidden = _hiddenThreads[uid] ?? const <String>{};
     final list = _conversations
         .where((c) =>
-            c.includes(uid) &&
-            !hidden.contains(c.id) &&
-            !isBlockedBetween(uid, c.otherParty(uid)))
+    c.includes(uid) &&
+        !hidden.contains(c.id) &&
+        !isBlockedBetween(uid, c.otherParty(uid)))
         .toList()
       ..sort((a, b) {
         final at = a.messages.isEmpty ? DateTime(0) : a.messages.last.sentAt;
@@ -170,11 +241,11 @@ class ChatService extends ChangeNotifier {
 
   /// Records a moderation report against [reportedUid] for admin review.
   void reportContact(
-    String reporterId,
-    String reportedUid,
-    String reason, {
-    String? conversationId,
-  }) {
+      String reporterId,
+      String reportedUid,
+      String reason, {
+        String? conversationId,
+      }) {
     if (reporterId.isEmpty ||
         reportedUid.isEmpty ||
         reporterId == reportedUid) {
@@ -195,7 +266,7 @@ class ChatService extends ChangeNotifier {
   Stream<List<ChatMessage>> messages(String conversationId) {
     final ctrl = _controllers.putIfAbsent(
       conversationId,
-      () => StreamController<List<ChatMessage>>.broadcast(),
+          () => StreamController<List<ChatMessage>>.broadcast(),
     );
     // Prime late subscribers with the current history.
     final convo = _byId(conversationId);
@@ -207,10 +278,8 @@ class ChatService extends ChangeNotifier {
     return ctrl.stream;
   }
 
-  /// Sends [text] from [senderId]. Rejects senders who aren't a participant.
-  ///
-  /// Returns true when the message was appended, false when the send was
-  /// rejected (empty text, non-participant, or either side blocked).
+  /// Sends [text] from [senderId]. If the device is offline, saves locally
+  /// into the offline queue to be sent automatically upon reconnection.
   bool send(String conversationId, String senderId, String text) {
     final convo = _byId(conversationId);
     if (convo == null || !convo.includes(senderId) || text.trim().isEmpty) {
@@ -221,18 +290,32 @@ class ChatService extends ChangeNotifier {
     if (isBlockedBetween(senderId, recipient)) return false;
 
     final now = DateTime.now();
-    convo.messages.add(ChatMessage(
+    final offline = !_isDeviceOnline;
+    final msg = ChatMessage(
       id: 'm_${now.microsecondsSinceEpoch}',
       senderId: senderId,
       text: text.trim(),
-      // Saved to the store immediately = Sent. If the recipient is already
-      // active, their device has received it = Delivered right away.
-      deliveredAt: PresenceService.instance.isOnline(recipient) ? now : null,
-    ));
+      isQueued: offline,
+      deliveredAt:
+      (!offline && PresenceService.instance.isOnline(recipient)) ? now : null,
+    );
+
+    convo.messages.add(msg);
+    _controllers[conversationId]?.add(List.unmodifiable(convo.messages));
+
+    if (offline) {
+      // Save locally on the device until connection returns.
+      _offlineQueue.add(_QueuedOutgoingMessage(
+        conversationId: conversationId,
+        message: msg,
+      ));
+      notifyListeners();
+      return true;
+    }
+
     // A new message brings a previously removed thread back for both parties.
     _hiddenFor(recipient).remove(conversationId);
     _hiddenFor(senderId).remove(conversationId);
-    _controllers[conversationId]?.add(List.unmodifiable(convo.messages));
 
     // Notify the recipient so they see it in their bell + message badge.
     final senderName = AuthService.instance.nameForUid(senderId);
@@ -293,6 +376,7 @@ class ChatService extends ChangeNotifier {
 
     message.deletedFor.add(uid);
     message.reactions.remove(uid);
+    _offlineQueue.removeWhere((q) => q.message.id == messageId);
     _publishMessages(convo);
     return true;
   }
@@ -311,6 +395,7 @@ class ChatService extends ChangeNotifier {
 
     message.deletedForEveryone = true;
     message.reactions.clear();
+    _offlineQueue.removeWhere((q) => q.message.id == messageId);
     _publishMessages(convo);
     return true;
   }
@@ -329,8 +414,8 @@ class ChatService extends ChangeNotifier {
 
   // ---- Admin broadcasts ----
   List<BroadcastMessage> get broadcasts => List.unmodifiable(
-        _broadcasts.reversed,
-      );
+    _broadcasts.reversed,
+  );
 
   bool get hasBroadcasts => _broadcasts.isNotEmpty;
 
@@ -368,6 +453,7 @@ class ChatService extends ChangeNotifier {
     for (final c in conversationsFor(uid)) {
       if (c.messages.isEmpty) continue;
       final last = c.messages.last;
+      if (last.isQueued) continue;
       final seenAt = _lastRead['$uid:${c.id}'];
       if (last.senderId != uid &&
           (seenAt == null || last.sentAt.isAfter(seenAt))) {
@@ -399,7 +485,11 @@ class ChatService extends ChangeNotifier {
     final convo = _byId(conversationId);
     if (convo != null) {
       for (final message in convo.messages) {
-        if (message.senderId == uid || message.deletedForEveryone) continue;
+        if (message.senderId == uid ||
+            message.deletedForEveryone ||
+            message.isQueued) {
+          continue;
+        }
         if (message.deliveredAt == null) {
           message.deliveredAt = now;
           changed = true;
@@ -438,9 +528,12 @@ class ChatService extends ChangeNotifier {
   /// When the recipient disabled read receipts the state is capped at
   /// "Delivered", even though the message may already be read internally.
   MessageDeliveryState visibleStateFor(
-    ChatMessage message,
-    String recipientUid,
-  ) {
+      ChatMessage message,
+      String recipientUid,
+      ) {
+    if (message.isQueued) {
+      return MessageDeliveryState.queued;
+    }
     if (message.readAt != null && readReceiptsEnabledFor(recipientUid)) {
       return MessageDeliveryState.read;
     }
@@ -459,7 +552,11 @@ class ChatService extends ChangeNotifier {
       if (!convo.includes(uid)) continue;
       var changed = false;
       for (final message in convo.messages) {
-        if (message.senderId == uid || message.deliveredAt != null) continue;
+        if (message.senderId == uid ||
+            message.deliveredAt != null ||
+            message.isQueued) {
+          continue;
+        }
         message.deliveredAt = now;
         changed = true;
       }

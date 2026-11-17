@@ -1,3 +1,5 @@
+enum AnnouncementPriority { normal, urgent, emergency }
+
 /// A campus-wide announcement. Only admins (or, in the future, authorized
 /// personnel) may publish these.
 class Announcement {
@@ -9,6 +11,11 @@ class Announcement {
   final String authorId;
   final String authorName;
   final DateTime createdAt;
+
+  /// PBI-9 & PBI-10: Urgency level & category tag (e.g. 'Class Suspension',
+  /// 'Room Change', 'Emergency Alert').
+  final AnnouncementPriority priority;
+  final String category;
 
   /// When an announcement originated from a user request that an admin
   /// approved, this records who originally asked for it.
@@ -25,12 +32,18 @@ class Announcement {
     required this.authorId,
     required this.authorName,
     DateTime? createdAt,
+    this.priority = AnnouncementPriority.normal,
+    this.category = 'General',
     this.requestedBy,
     this.imageURL,
     this.videoURL,
   }) : createdAt = createdAt ?? DateTime.now();
 
   bool get hasMedia => imageURL != null || videoURL != null;
+  bool get isUrgent =>
+      priority == AnnouncementPriority.urgent ||
+          priority == AnnouncementPriority.emergency;
+  bool get isEmergency => priority == AnnouncementPriority.emergency;
 
   /// A short preview of the body for cards/dashboards (first line, trimmed).
   String get brief {
@@ -39,15 +52,17 @@ class Announcement {
   }
 
   Map<String, dynamic> toMap() => {
-        'title': title,
-        'body': body,
-        'authorId': authorId,
-        'authorName': authorName,
-        'createdAt': createdAt.toIso8601String(),
-        'requestedBy': requestedBy,
-        'imageURL': imageURL,
-        'videoURL': videoURL,
-      };
+    'title': title,
+    'body': body,
+    'authorId': authorId,
+    'authorName': authorName,
+    'createdAt': createdAt.toIso8601String(),
+    'priority': priority.name,
+    'category': category,
+    'requestedBy': requestedBy,
+    'imageURL': imageURL,
+    'videoURL': videoURL,
+  };
 }
 
 /// Status of a user's request to have an announcement published.

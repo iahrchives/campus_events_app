@@ -1,6 +1,5 @@
-
 /// Delivery lifecycle of a direct message, from the sender's perspective.
-enum MessageDeliveryState { sent, delivered, read }
+enum MessageDeliveryState { queued, sent, delivered, read }
 
 /// A single message inside a private buyer↔seller conversation.
 class ChatMessage {
@@ -11,6 +10,9 @@ class ChatMessage {
   final Map<String, String> reactions;
   final Set<String> deletedFor;
   bool deletedForEveryone;
+
+  /// PBI-8: True while saved locally on the device awaiting internet return.
+  bool isQueued;
 
   /// When the recipient's device received the message (null until delivered).
   DateTime? deliveredAt;
@@ -26,6 +28,7 @@ class ChatMessage {
     Map<String, String>? reactions,
     Set<String>? deletedFor,
     this.deletedForEveryone = false,
+    this.isQueued = false,
     this.deliveredAt,
     this.readAt,
   })  : sentAt = sentAt ?? DateTime.now(),
@@ -34,6 +37,7 @@ class ChatMessage {
 
   /// Derived delivery state from the stored timestamps.
   MessageDeliveryState get deliveryState {
+    if (isQueued) return MessageDeliveryState.queued;
     if (readAt != null) return MessageDeliveryState.read;
     if (deliveredAt != null) return MessageDeliveryState.delivered;
     return MessageDeliveryState.sent;

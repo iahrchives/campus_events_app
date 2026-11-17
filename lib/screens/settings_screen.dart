@@ -9,6 +9,7 @@ import '../theme/theme.dart';
 import '../widgets/soft_card.dart';
 import 'account_verification_screen.dart';
 import 'contacts_screen.dart';
+import 'help_desk_screen.dart';
 
 /// App Settings — typical preferences incl. a working dark-mode toggle.
 class SettingsScreen extends StatefulWidget {
@@ -81,6 +82,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
           _navTile(
+            icon: Icons.support_agent_rounded,
+            title: 'Help Desk & FAQ',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HelpDeskScreen()),
+              );
+            },
+          ),
+          _navTile(
             icon: Icons.info_outline,
             title: 'About',
             onTap: _showAbout,
@@ -93,7 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: "Show when you've read someone's message",
             value: ChatService.instance.readReceiptsEnabledFor(_uid),
             onChanged: (v) => setState(
-                () => ChatService.instance.setReadReceiptsEnabled(_uid, v)),
+                    () => ChatService.instance.setReadReceiptsEnabled(_uid, v)),
           ),
           _switchTile(
             icon: Icons.circle_outlined,
@@ -101,7 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Show when you are online or last active',
             value: PresenceService.instance.activeStatusEnabledFor(_uid),
             onChanged: (v) => setState(
-                () => PresenceService.instance.setActiveStatusEnabled(_uid, v)),
+                    () => PresenceService.instance.setActiveStatusEnabled(_uid, v)),
           ),
           if (!AuthService.instance.isAdmin) ...[
             const SizedBox(height: 18),
@@ -132,14 +143,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _section(String title) => Padding(
-        padding: const EdgeInsets.only(left: 6, bottom: 8, top: 4),
-        child: Text(title.toUpperCase(),
-            style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 12.5,
-                letterSpacing: 0.6,
-                color: AppColors.primary)),
-      );
+    padding: const EdgeInsets.only(left: 6, bottom: 8, top: 4),
+    child: Text(title.toUpperCase(),
+        style: const TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 12.5,
+            letterSpacing: 0.6,
+            color: AppColors.primary)),
+  );
 
   Widget _switchTile({
     required IconData icon,
@@ -229,12 +240,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         mainAxisSize: MainAxisSize.min,
         children: options
             .map((o) => ListTile(
-                  title: Text(o, style: TextStyle(color: AppColors.textDark)),
-                  trailing: _s.language == o
-                      ? const Icon(Icons.check, color: AppColors.primary)
-                      : null,
-                  onTap: () => Navigator.pop(ctx, o),
-                ))
+          title: Text(o, style: TextStyle(color: AppColors.textDark)),
+          trailing: _s.language == o
+              ? const Icon(Icons.check, color: AppColors.primary)
+              : null,
+          onTap: () => Navigator.pop(ctx, o),
+        ))
             .toList(),
       ),
     );

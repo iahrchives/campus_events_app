@@ -65,7 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (uid.isEmpty) return;
     final convo = widget.conversation;
     final hasUnreadIncoming = convo.messages.any((m) =>
-        m.senderId != uid &&
+    m.senderId != uid &&
         m.readAt == null &&
         !m.deletedForEveryone &&
         !m.deletedFor.contains(uid));
@@ -221,7 +221,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
                     color: AppColors.neutralLight,
                     borderRadius: BorderRadius.circular(12),
@@ -231,7 +232,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.reply_rounded, size: 16, color: AppColors.primary),
+                      Icon(Icons.reply_rounded,
+                          size: 16, color: AppColors.primary),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -254,7 +256,12 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   static const List<String> _availableReactions = [
-    '❤️', '😂', '😮', '😢', '👍', '👎',
+    '❤️',
+    '😂',
+    '😮',
+    '😢',
+    '👍',
+    '👎',
   ];
 
   Future<void> _addReaction(ChatMessage message) async {
@@ -471,10 +478,10 @@ class _ChatScreenState extends State<ChatScreen> {
         final label = online
             ? 'Online'
             : relative == null
-                ? 'Offline'
-                : relative == 'just now'
-                    ? 'Last seen just now'
-                    : 'Last seen $relative ago';
+            ? 'Offline'
+            : relative == 'just now'
+            ? 'Last seen just now'
+            : 'Last seen $relative ago';
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -506,13 +513,18 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// PBI-6: Sent / Delivered / Read indicator for the user's own messages.
+  /// PBI-6 & PBI-8: Queued (Offline) / Sent / Delivered / Read indicator.
   Widget _buildStatusLine(ChatMessage message, String recipientUid) {
     final state = ChatService.instance.visibleStateFor(message, recipientUid);
     final IconData icon;
     final String label;
     final Color color;
     switch (state) {
+      case MessageDeliveryState.queued:
+        icon = Icons.access_time_rounded;
+        label = 'Queued (Offline)';
+        color = Colors.deepOrange;
+        break;
       case MessageDeliveryState.sent:
         icon = Icons.check;
         label = 'Sent';
@@ -550,10 +562,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageItem(
-    ChatMessage message,
-    String currentUid,
-    String otherUid,
-  ) {
+      ChatMessage message,
+      String currentUid,
+      String otherUid,
+      ) {
     final isMe = message.senderId == currentUid;
 
     if (message.deletedForEveryone ||
@@ -630,7 +642,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     final convo = widget.conversation;
@@ -648,6 +659,25 @@ class _ChatScreenState extends State<ChatScreen> {
         toolbarHeight: 70,
         titleSpacing: 0,
         actions: [
+          // PBI-8: Wi-Fi / Offline simulation toggle for testing & demo
+          AnimatedBuilder(
+            animation: ChatService.instance,
+            builder: (context, _) {
+              final online = ChatService.instance.isDeviceOnline;
+              return IconButton(
+                tooltip: online
+                    ? 'Simulate Wi-Fi loss (Go Offline)'
+                    : 'Reconnect Wi-Fi (Flush Offline Queue)',
+                icon: Icon(
+                  online ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                  color: online ? Colors.white : Colors.amberAccent,
+                ),
+                onPressed: () {
+                  ChatService.instance.setDeviceOnline(!online);
+                },
+              );
+            },
+          ),
           PopupMenuButton<String>(
             tooltip: 'Contact options',
             icon: const Icon(Icons.more_vert),
@@ -709,7 +739,8 @@ class _ChatScreenState extends State<ChatScreen> {
             color: AppColors.primary.withValues(alpha: 0.1),
             child: Row(
               children: [
-                const Icon(Icons.lock_outline, size: 16, color: AppColors.primary),
+                const Icon(Icons.lock_outline,
+                    size: 16, color: AppColors.primary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -719,6 +750,42 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ],
             ),
+          ),
+
+          // PBI-8: Offline Queue status banner
+          AnimatedBuilder(
+            animation: ChatService.instance,
+            builder: (context, _) {
+              if (ChatService.instance.isDeviceOnline) {
+                return const SizedBox.shrink();
+              }
+              final queuedCount = ChatService.instance.queuedMessageCount;
+              return Container(
+                width: double.infinity,
+                padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: Colors.amber.withValues(alpha: 0.18),
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_off_rounded,
+                        size: 16, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        queuedCount > 0
+                            ? 'You are offline. $queuedCount message(s) saved locally and will send automatically when Wi-Fi returns.'
+                            : 'You are offline. Typed messages will be queued locally until connection returns.',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.deepOrange,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
 
           if (isBlocked)
@@ -747,8 +814,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
 
-
-// Message Thread Stream
+          // Message Thread Stream
           Expanded(
             child: StreamBuilder<List<ChatMessage>>(
               stream: ChatService.instance.messages(convo.id),
@@ -787,7 +853,6 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-
 
           if (!isBlocked) ...[
             // PBI-3: Quick-Reply Bar (Naka-linya pababa)
@@ -833,15 +898,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           : 'Send',
                       icon: _cooldownRemaining > 0
                           ? Text(
-                              '${_cooldownRemaining}s',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.textMuted,
-                              ),
-                            )
+                        '${_cooldownRemaining}s',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textMuted,
+                        ),
+                      )
                           : const Icon(Icons.send_rounded,
-                              color: AppColors.primary),
+                          color: AppColors.primary),
                       onPressed: _cooldownRemaining > 0
                           ? null
                           : () => _sendMessage(),
